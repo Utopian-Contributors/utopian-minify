@@ -562,7 +562,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
     <script type="module">
       await Promise.resolve(
         setTimeout(async () => {
-          if (window.__SUSTAINABLE_BUILD__) {
+          if (document.documentElement.hasAttribute('sustainable-extension-loaded')) {
             await import("${miniScriptPath}");
           } else {
             await import("${standardScriptPath}");

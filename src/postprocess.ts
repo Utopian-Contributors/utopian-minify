@@ -11,21 +11,35 @@ import { join, resolve } from "path";
 import semver from "semver";
 import type { InlineConfig } from "vite";
 import { build as viteBuild } from "vite";
-import defaultCdnMappings from "./cdn-mappings.json" with { type: "json" };
-import manifestExport from "./manifest.export.json" with { type: "json" };
+import availableExports from "./cdn-exports.json" with { type: "json" };
+import cdnMappings from "./cdn-mappings.json" with { type: "json" };
 
-interface CDNMapping {
-  [packageName: string]: string; // URL template with {version} placeholder
+interface PeerDependencies {
+  [packageName: string]: string;
 }
 
-interface ManifestExport {
-  [packageName: string]: string[]; // Array of available versions
+interface AnalyzedDependency {
+  name: string;
+  version: string;
+  url: string;
+  peerContext?: { [peerName: string]: string };
+  peerDependencies?: PeerDependencies;
+}
+
+interface StandaloneSubpath {
+  name: string;
+  fromVersion: string;
+}
+
+interface AvailableExports {
+  availableVersions: { [packageName: string]: string[] }; // Array of available versions
+  packages: AnalyzedDependency[]; // Array of available versions
+  standaloneSubpaths?: { [packageName: string]: StandaloneSubpath[] };
 }
 
 export interface PostProcessOptions {
   root?: string;
   outDir?: string;
-  cdnMappingsPath?: string;
   exclude?: string[];
 }
 
@@ -45,8 +59,9 @@ async function getAllLockDependencies(
       let currentPackage = "";
 
       for (const line of lines) {
-        // Match package declaration like: "package@version":
-        const packageMatch = line.match(/^"?([^@\s]+)@[^"]*"?:$/);
+        // Match package declaration like: "package@version": or "@scope/package@version":
+        // Need to handle scoped packages which start with @
+        const packageMatch = line.match(/^"?(@?[^@\s]+)@[^"]*"?:$/);
         if (packageMatch && packageMatch[1]) {
           currentPackage = packageMatch[1];
           continue;
@@ -74,7 +89,13 @@ async function getAllLockDependencies(
         Object.keys(packageLock.packages).forEach((path) => {
           if (path.startsWith("node_modules/")) {
             const parts = path.replace("node_modules/", "").split("/");
-            const packageName = parts[0];
+            // Handle scoped packages like @scope/package
+            let packageName: string;
+            if (parts[0]?.startsWith("@") && parts[1]) {
+              packageName = `${parts[0]}/${parts[1]}`;
+            } else {
+              packageName = parts[0] || "";
+            }
             if (packageName) {
               const packageData = packageLock.packages[path];
               if (packageData.version && !versions[packageName]) {
@@ -107,47 +128,75 @@ async function getAllLockDependencies(
 }
 
 /**
- * Finds the closest available version from the manifest using semver
- * Prefers the exact match or the highest version that's <= requested version
- * Falls back to the lowest available version if requested version is lower than all available
+ * Gets package.json dependencies with their version ranges
+ */
+async function getPackageJsonDependencies(
+  rootPath: string,
+): Promise<Record<string, string>> {
+  const dependencies: Record<string, string> = {};
+
+  try {
+    const packageJsonPath = resolve(rootPath, "package.json");
+    if (existsSync(packageJsonPath)) {
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+      
+      // Combine dependencies and devDependencies
+      if (packageJson.dependencies) {
+        Object.assign(dependencies, packageJson.dependencies);
+      }
+      if (packageJson.devDependencies) {
+        Object.assign(dependencies, packageJson.devDependencies);
+      }
+    }
+  } catch (error) {
+    console.warn("⚠️ Could not read package.json:", error);
+  }
+
+  return dependencies;
+}
+
+/**
+ * Finds the best matching version from available versions using semver
+ * Priority 1: Exact match with lock file version
+ * Priority 2: Highest version that satisfies package.json semver range
+ * Otherwise: Throws an error
  */
 function findClosestVersion(
-  requestedVersion: string,
+  lockVersion: string,
+  packageJsonRange: string | undefined,
   availableVersions: string[],
-): string | null {
-  if (availableVersions.length === 0) return null;
-
-  // Clean and validate versions
-  const cleanRequested = semver.clean(requestedVersion);
-  if (!cleanRequested) {
-    console.warn(`  ⚠️  Invalid requested version: ${requestedVersion}`);
-    return availableVersions[0] || null; // Return first available as fallback
+  packageName: string,
+): string {
+  if (availableVersions.length === 0) {
+    throw new Error(
+      `No versions available for ${packageName} in manifest`
+    );
   }
 
-  // Check for exact match first
-  if (availableVersions.includes(requestedVersion)) {
-    return requestedVersion;
+  // Priority 1: Check for exact match with lock file version
+  if (availableVersions.includes(lockVersion)) {
+    return lockVersion;
   }
 
-  // Filter and sort available versions in descending order
-  const validVersions = availableVersions
-    .filter((v) => semver.valid(v))
-    .sort((a, b) => semver.rcompare(a, b)); // rcompare sorts descending
+  // Priority 2: If package.json range is available, find a compatible version
+  if (packageJsonRange) {
+    // Filter and sort available versions in descending order
+    const validVersions = availableVersions
+      .filter((v) => semver.valid(v))
+      .sort((a, b) => semver.rcompare(a, b)); // highest first
 
-  if (validVersions.length === 0) {
-    console.warn(`  ⚠️  No valid semver versions available`);
-    return availableVersions[0] || null; // Return first available as fallback
-  }
-
-  // Find the highest version that's <= requested version
-  for (const version of validVersions) {
-    if (semver.lte(version, cleanRequested)) {
-      return version;
+    // Find the highest version that satisfies the package.json range
+    for (const version of validVersions) {
+      if (semver.satisfies(version, packageJsonRange)) {
+        return version;
+      }
     }
   }
 
-  // If requested version is lower than all available, use the lowest available
-  return validVersions[validVersions.length - 1] || null;
+  // No compatible version found - throw error
+  throw new Error(
+    `No compatible version found for ${packageName}. Lock file has ${lockVersion}, package.json specifies ${packageJsonRange || "N/A"}, but available versions are: ${availableVersions.join(", ")}`
+  );
 }
 
 /**
@@ -155,41 +204,44 @@ function findClosestVersion(
  */
 function mapToAvailableVersions(
   lockDependencies: Record<string, string>,
-  manifest: ManifestExport,
+  packageJsonDependencies: Record<string, string>,
+  availableExports: AvailableExports,
 ): Record<string, string> {
   const mappedVersions: Record<string, string> = {};
 
   Object.keys(lockDependencies).forEach((packageName) => {
-    const requestedVersion = lockDependencies[packageName];
-    if (!requestedVersion) return;
+    const lockVersion = lockDependencies[packageName];
+    if (!lockVersion) return;
 
-    const availableVersions = manifest[packageName];
+    const availableVersions = availableExports.availableVersions[packageName];
 
-    if (availableVersions && availableVersions.length > 0) {
-      const closestVersion = findClosestVersion(
-        requestedVersion,
-        availableVersions,
+    if (!availableVersions || availableVersions.length === 0) {
+      throw new Error(
+        `⚠️ ${packageName}: Not available in the manifest. Please exclude it manually from being processed.`,
       );
-      if (closestVersion) {
-        mappedVersions[packageName] = closestVersion;
-        if (closestVersion !== requestedVersion) {
-          console.log(
-            `  📦 ${packageName}: ${requestedVersion} → ${closestVersion} (closest available)`,
-          );
-        } else {
-          console.log(`  ✓ ${packageName}: ${requestedVersion} (exact match)`);
-        }
+    }
+
+    try {
+      const packageJsonRange = packageJsonDependencies[packageName];
+      const closestVersion = findClosestVersion(
+        lockVersion,
+        packageJsonRange,
+        availableVersions,
+        packageName,
+      );
+      
+      mappedVersions[packageName] = closestVersion;
+      
+      if (closestVersion === lockVersion) {
+        console.log(`  ✓ ${packageName}: ${lockVersion} (exact match)`);
       } else {
-        // No suitable version found
-        throw new Error(
-          `  ⚠️  ${packageName}: No suitable version found in manifest, you will need to exclude it manually from being processed.`,
+        console.log(
+          `  📦 ${packageName}: ${lockVersion} → ${closestVersion} (satisfies ${packageJsonRange || "lock version"})`,
         );
       }
-    } else {
-      // Package not in manifest, use requested version
-      throw new Error(
-        `  ⚠️  ${packageName}: The requested package is not available in the manifest, you will need to exclude it manually from being processed.`,
-      );
+    } catch (error) {
+      // Re-throw with package name for context
+      throw error;
     }
   });
 
@@ -197,12 +249,7 @@ function mapToAvailableVersions(
 }
 
 export async function createDualBuild(options: PostProcessOptions = {}) {
-  const {
-    root = process.cwd(),
-    outDir = "dist",
-    cdnMappingsPath,
-    exclude = [],
-  } = options;
+  const { root = process.cwd(), outDir = "dist", exclude = [] } = options;
 
   const rootDir = resolve(root);
   const outputDir = resolve(rootDir, outDir);
@@ -211,40 +258,6 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
   console.log("🚀 Starting sustainable post-processing...");
 
   try {
-    // Read CDN mappings
-    let cdnMappings: CDNMapping = defaultCdnMappings;
-
-    if (cdnMappingsPath) {
-      const mappingsPath = resolve(rootDir, cdnMappingsPath);
-      if (existsSync(mappingsPath)) {
-        const customMappings = JSON.parse(readFileSync(mappingsPath, "utf-8"));
-
-        // Validate that all CDN mappings use esm.sh
-        const invalidMappings: string[] = [];
-        Object.entries(customMappings).forEach(([packageName, url]) => {
-          if (typeof url === "string" && !url.includes("esm.sh")) {
-            invalidMappings.push(`${packageName}: ${url}`);
-          }
-        });
-
-        if (invalidMappings.length > 0) {
-          console.error("❌ Custom CDN mappings contain non-esm.sh URLs:");
-          invalidMappings.forEach((mapping) => {
-            console.error(`   ${mapping}`);
-          });
-          console.error("\n⚠️  Currently, only esm.sh CDN is supported.");
-          console.error(
-            "   Please update your cdn-mappings.json to use esm.sh URLs.",
-          );
-          console.error("   Example: https://esm.sh/package-name@{version}");
-          throw new Error("Invalid CDN mappings");
-        }
-
-        cdnMappings = customMappings;
-        console.log(`✅ Loaded custom CDN mappings from ${mappingsPath}`);
-      }
-    }
-
     console.log(
       `📋 CDN mappings available for ${Object.keys(cdnMappings).length} packages`,
     );
@@ -256,9 +269,12 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       `📦 Found ${Object.keys(allLockDependencies).length} dependencies in lock file`,
     );
 
-    // Filter dependencies to externalize based on CDN mappings
+    // Get package.json dependencies for semver range comparison
+    const packageJsonDeps = await getPackageJsonDependencies(rootDir);
+
+    // Filter dependencies to externalize based on CDN mappings and package.json presence
     const depsToExternalize = Object.keys(cdnMappings).filter(
-      (dep) => allLockDependencies[dep] && !exclude.includes(dep),
+      (dep) => allLockDependencies[dep] && !exclude.includes(dep) && packageJsonDeps[dep],
     );
 
     console.log(
@@ -283,7 +299,8 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
     console.log("🔍 Mapping to available versions from browser extension...");
     const availableVersions = mapToAvailableVersions(
       depsWithVersions,
-      manifestExport as ManifestExport,
+      packageJsonDeps,
+      availableExports as AvailableExports,
     );
 
     console.log(
@@ -295,13 +312,108 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       return;
     }
 
-    // Generate import map using available versions
-    const importMap: Record<string, string> = {};
+    // Find matching package entries with peer dependencies
+    console.log("🔗 Resolving peer dependencies...");
+    const packageEntries: Record<string, AnalyzedDependency> = {};
+
     depsToExternalize.forEach((dep) => {
       const version = availableVersions[dep];
-      const cdnUrl = cdnMappings[dep];
-      if (cdnUrl && version) {
-        importMap[dep] = cdnUrl.replace("{version}", version);
+      if (!version) return;
+
+      // Find all package entries that match name and version
+      const matchingPackages = (
+        availableExports as AvailableExports
+      ).packages.filter((pkg) => pkg.name === dep && pkg.version === version);
+
+      if (matchingPackages.length > 0) {
+        // If there are multiple matches, prefer the one whose peerContext matches our available versions
+        let selectedPackage = matchingPackages[0];
+
+        if (matchingPackages.length > 1) {
+          // Look for a package whose peerContext matches our resolved versions
+          const matchingPeerPackage = matchingPackages.find((pkg) => {
+            if (!pkg.peerContext) return false;
+
+            // Check if all peer dependencies match our available versions
+            return Object.entries(pkg.peerContext).every(
+              ([peerName, peerVersion]) => {
+                return availableVersions[peerName] === peerVersion;
+              },
+            );
+          });
+
+          if (matchingPeerPackage) {
+            selectedPackage = matchingPeerPackage;
+            console.log(
+              `  🎯 ${dep}@${version} matched with peer context:`,
+              Object.entries(matchingPeerPackage.peerContext || {})
+                .map(([k, v]) => `${k}@${v}`)
+                .join(", "),
+            );
+          } else {
+            // If no exact match, just use the first one
+            selectedPackage = matchingPackages[0];
+            if (selectedPackage?.peerContext) {
+              throw new Error(
+                `  ⚠️  ${dep}@${version} has peer dependencies but no exact match found: ${Object.keys(selectedPackage.peerContext).join(", ")}`,
+              );
+            }
+          }
+        } else if (selectedPackage?.peerContext) {
+          console.log(
+            `  🔗 ${dep}@${version} has peer dependencies:`,
+            Object.keys(selectedPackage.peerContext).join(", "),
+          );
+        } else {
+          console.log(`  ✓ ${dep}@${version} (no peer dependencies)`);
+        }
+
+        if (selectedPackage) {
+          packageEntries[dep] = selectedPackage;
+        }
+      }
+    });
+
+    // Generate import map using URLs from package entries
+    const importMap: Record<string, string> = {};
+    depsToExternalize.forEach((dep) => {
+      const packageEntry = packageEntries[dep];
+      if (packageEntry?.url) {
+        // Use the URL from the package entry which includes peer dependencies
+        importMap[dep] = packageEntry.url;
+      } else {
+        throw new Error("No package entry found for " + dep);
+      }
+    });
+
+    // Add standalone subpaths to import map
+    console.log("🔗 Adding standalone subpaths to import map...");
+    const standaloneSubpaths = (availableExports as AvailableExports).standaloneSubpaths || {};
+    
+    depsToExternalize.forEach((dep) => {
+      const version = availableVersions[dep];
+      if (!version) return;
+
+      const subpaths = standaloneSubpaths[dep];
+      if (subpaths && subpaths.length > 0) {
+        subpaths.forEach((subpath) => {
+          // Check if the version satisfies the fromVersion requirement
+          if (semver.satisfies(version, subpath.fromVersion)) {
+            const subpathName = `${dep}/${subpath.name}`;
+            
+            // Find the package entry for this subpath in availableExports.packages
+            const subpathPackage = (availableExports as AvailableExports).packages.find(
+              (pkg) => pkg.name === subpathName && pkg.version === version
+            );
+            
+            if (subpathPackage) {
+              importMap[subpathName] = subpathPackage.url;
+              console.log(`  ✓ Added subpath: ${subpathName}@${version}`);
+            } else {
+              console.warn(`  ⚠️  Subpath package not found: ${subpathName}@${version}`);
+            }
+          }
+        });
       }
     });
 
@@ -344,6 +456,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
 
     // Run mini build with externalized dependencies
     console.log("🔨 Building mini version with externalized dependencies...");
+    console.log("🔍 Dependencies to externalize:", depsToExternalize);
 
     const miniBuildConfig: InlineConfig = {
       root: rootDir,
@@ -353,7 +466,17 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
         emptyOutDir: true,
         copyPublicDir: false,
         rollupOptions: {
-          external: depsToExternalize,
+          external: (id: string) => {
+            // Check if the import ID matches any of our externalized dependencies
+            // This handles both regular imports and scoped packages
+            return depsToExternalize.some(dep => {
+              // Exact match
+              if (id === dep) return true;
+              // Handle subpath imports like "@emotion/is-prop-valid/lib/index.js"
+              if (id.startsWith(dep + '/')) return true;
+              return false;
+            });
+          },
           output: {
             format: "es",
             entryFileNames: "assets/index-[hash].js",

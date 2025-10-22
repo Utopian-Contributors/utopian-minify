@@ -26,7 +26,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js",
+    "build": "rimraf dist && tsc && chmod +x dist/cli.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "yarn clean && yarn build"
@@ -40,6 +40,7 @@
     "@types/node": "^22.10.4",
     "@types/semver": "^7.5.8",
     "prettier": "^3.6.2",
+    "rimraf": "^6.0.1",
     "tsc": "^2.0.4",
     "typescript": "^5.9.3",
     "vite": "^7.1.9"

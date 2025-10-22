@@ -529,14 +529,20 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
 
       mkdirSync(targetMiniDir, { recursive: true });
 
-      // Move only the asset files, not the HTML
-      assetFiles.forEach((file) => {
+      // Move only JavaScript files (CSS is the same as standard build)
+      const jsFiles = assetFiles.filter(file => file.endsWith('.js'));
+      console.log(`📦 Moving ${jsFiles.length} JavaScript files (CSS uses standard build)`);
+      
+      jsFiles.forEach((file) => {
         console.log(`  📄 Moving: ${file}`);
         cpSync(join(miniAssetsDir, file), join(targetMiniDir, file));
       });
     } else {
       console.warn(`⚠️  No assets directory found at: ${miniAssetsDir}`);
     }
+
+    // Extract additional head content (analytics scripts, etc.) from the original HTML
+    const additionalHeadContent = extractAdditionalHeadContent(standardHtml);
 
     // Create the unified index.html with conditional loading
     const unifiedHtml = `<!DOCTYPE html>
@@ -545,7 +551,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${getTitle(standardHtml)}</title>
+    <title>${getTitle(standardHtml)}</title>${additionalHeadContent}
 
     <script type="importmap">
       {
@@ -606,6 +612,44 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
 function getTitle(html: string): string {
   const titleMatch = html.match(/<title>([^<]+)<\/title>/);
   return titleMatch?.[1] || "Vite App";
+}
+
+/**
+ * Extracts additional scripts and meta tags from the head that should be preserved
+ * Excludes the build's module script and stylesheet links
+ */
+function extractAdditionalHeadContent(html: string): string {
+  const headMatch = html.match(/<head>([\s\S]*?)<\/head>/);
+  if (!headMatch || !headMatch[1]) return "";
+
+  const headContent = headMatch[1];
+  const lines: string[] = [];
+
+  // Split by lines and filter out what we'll be replacing
+  const headLines = headContent.split("\n");
+  
+  for (const line of headLines) {
+    const trimmed = line.trim();
+    
+    // Skip if it's a charset, viewport, title, or the build's assets
+    if (
+      trimmed.startsWith("<meta charset") ||
+      trimmed.startsWith('<meta name="viewport"') ||
+      trimmed.startsWith("<title>") ||
+      trimmed.startsWith('<link rel="icon"') ||
+      trimmed.match(/<script type="module" crossorigin src="\/assets\//) ||
+      trimmed.match(/<link rel="stylesheet" crossorigin href="\/assets\//)
+    ) {
+      continue;
+    }
+    
+    // Keep everything else (analytics scripts, other meta tags, etc.)
+    if (trimmed.length > 0) {
+      lines.push(line);
+    }
+  }
+
+  return lines.length > 0 ? "\n" + lines.join("\n") : "";
 }
 
 // Allow running as a CLI script

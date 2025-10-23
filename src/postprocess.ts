@@ -567,7 +567,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
           } else {
             await import("${standardScriptPath}");
           }
-        }, 10)
+        }, 20)
       );
     </script>
     <link rel="stylesheet" crossorigin href="${standardStylePath}" />

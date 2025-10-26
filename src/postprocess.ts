@@ -1,11 +1,11 @@
 import {
-    cpSync,
-    existsSync,
-    mkdirSync,
-    readFileSync,
-    readdirSync,
-    rmSync,
-    writeFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
 } from "fs";
 import { join, resolve } from "path";
 import semver from "semver";
@@ -543,6 +543,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
 
     // Extract additional head content (analytics scripts, etc.) from the original HTML
     const additionalHeadContent = extractAdditionalHeadContent(standardHtml);
+    const bodyContent = extractBodyContent(standardHtml);
 
     // Create the unified index.html with conditional loading
     const unifiedHtml = `<!DOCTYPE html>
@@ -572,9 +573,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
     </script>
     <link rel="stylesheet" crossorigin href="${standardStylePath}" />
   </head>
-  <body>
-    <div id="root"></div>
-  </body>
+  <body>${bodyContent}</body>
 </html>`;
 
     // Write the unified HTML
@@ -650,6 +649,14 @@ function extractAdditionalHeadContent(html: string): string {
   }
 
   return lines.length > 0 ? "\n" + lines.join("\n") : "";
+}
+
+function extractBodyContent(html: string): string {
+  const bodyMatch = html.match(/<body>([\s\S]*?)<\/body>/);
+  if (!bodyMatch || !bodyMatch[1]) return "";
+
+  const bodyContent = bodyMatch[1];
+  return bodyContent;
 }
 
 // Allow running as a CLI script

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "fs";
@@ -11,6 +12,7 @@ import { join, resolve } from "path";
 import semver from "semver";
 import type { InlineConfig } from "vite";
 import { build as viteBuild } from "vite";
+import { gzipSync } from "zlib";
 import availableExports from "./cdn-exports.json" with { type: "json" };
 import cdnMappings from "./cdn-mappings.json" with { type: "json" };
 
@@ -445,6 +447,16 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
 
       standardScriptPath = scriptMatch?.[1] || "";
       standardStylePath = styleMatch?.[1] || "";
+
+      // Rename standard build JS assets to include file size
+      if (standardScriptPath) {
+        const standardScriptFullPath = join(outputDir, standardScriptPath);
+        if (existsSync(standardScriptFullPath)) {
+          const newFileName = renameAssetWithSize(standardScriptFullPath);
+          standardScriptPath = `/assets/${newFileName}`;
+          console.log(`📏 Standard build script: ${standardScriptPath}`);
+        }
+      }
     } else {
       console.error("❌ No index.html found in build directory");
       return;
@@ -517,7 +529,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       }
     }
 
-    // Move mini assets to dist/mini
+    // Move mini assets to dist/mini and rename with file size
     const miniAssetsDir = join(miniDir, "assets");
     const targetMiniDir = join(outputDir, "mini");
 
@@ -534,8 +546,19 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       console.log(`📦 Moving ${jsFiles.length} JavaScript files (CSS uses standard build)`);
       
       jsFiles.forEach((file) => {
+        const sourcePath = join(miniAssetsDir, file);
+        const targetPath = join(targetMiniDir, file);
         console.log(`  📄 Moving: ${file}`);
-        cpSync(join(miniAssetsDir, file), join(targetMiniDir, file));
+        cpSync(sourcePath, targetPath);
+        
+        // Rename to include file size
+        const newFileName = renameAssetWithSize(targetPath);
+        
+        // Update miniScriptPath if this is the main script
+        if (miniScriptPath.includes(file)) {
+          miniScriptPath = `/mini/${newFileName}`;
+          console.log(`📏 Mini build script: ${miniScriptPath}`);
+        }
       });
     } else {
       console.warn(`⚠️  No assets directory found at: ${miniAssetsDir}`);
@@ -611,6 +634,40 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
 function getTitle(html: string): string {
   const titleMatch = html.match(/<title>([^<]+)<\/title>/);
   return titleMatch?.[1] || "Vite App";
+}
+
+/**
+ * Renames an asset file to include the gzipped file size in bytes in the filename
+ * Pattern: index-HASH.js becomes index-HASH-1234.js (where 1234 is gzipped bytes)
+ * Returns the new filename
+ */
+function renameAssetWithSize(filePath: string): string {
+  // Read the file content
+  const fileContent = readFileSync(filePath);
+  
+  // Calculate gzipped size (what the browser would actually download)
+  const gzippedContent = gzipSync(fileContent);
+  const gzippedSize = gzippedContent.length;
+  const rawSize = fileContent.length;
+  
+  // Parse the filename to extract hash
+  const fileName = filePath.split('/').pop() || '';
+  const match = fileName.match(/^(.+)-([a-zA-Z0-9_-]+)\.(.+)$/);
+  
+  if (!match) {
+    console.warn(`⚠️  Could not parse filename pattern: ${fileName}`);
+    return fileName;
+  }
+  
+  const [, baseName, hash, extension] = match;
+  const newFileName = `${baseName}-${hash}-${gzippedSize}.${extension}`;
+  const newFilePath = filePath.replace(fileName, newFileName);
+  
+  renameSync(filePath, newFilePath);
+  const compressionRatio = ((1 - gzippedSize / rawSize) * 100).toFixed(1);
+  console.log(`  📏 Renamed: ${fileName} → ${newFileName} (${gzippedSize} bytes gzipped, ${compressionRatio}% smaller)`);
+  
+  return newFileName;
 }
 
 /**

@@ -23,8 +23,6 @@ for (let i = 0; i < args.length; i += 2) {
     options.root = value;
   } else if (key === 'outDir' && value) {
     options.outDir = value;
-  } else if (key === 'cdnMappingsPath' && value) {
-    options.cdnMappingsPath = value;
   }
 }
 

@@ -3,7 +3,7 @@
 [![npm version](https://badge.fury.io/js/vite-sustainable.svg)](https://badge.fury.io/js/vite-sustainable)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Vite post-processing tool that enhances your existing build with a sustainable alternative. It creates an additional optimized mini build with externalized dependencies loaded from CDNs using import maps, then updates your index.html to conditionally load the based on the `window.__SUSTAINABLE_BUILD__` flag. This ensures the mini build is only loaded when the sustainable browser extension is installed.
+A Vite post-processing tool that enhances your existing build with a sustainable alternative. It creates an additional optimized mini build with externalized dependencies loaded from esm.sh CDNs using import maps, then updates your index.html to conditionally load the based on the `sustainable-extension-loaded` attribute on the html document. This ensures the mini build is only loaded when the sustainable browser extension is installed.
 
 
 ## Features
@@ -52,24 +52,7 @@ npm run build
 
 ```bash
 # With custom options
-npx vite-sustainable --outDir dist --cdnMappingsPath ./custom-mappings.json --exclude react,react-dom
-```
-
-### As a Plugin (Legacy Mode)
-
-```ts
-// vite.config.ts
-import { defineConfig } from 'vite'
-import sustainable from 'vite-sustainable'
-
-export default defineConfig({
-  plugins: [
-    sustainable({
-      cdnMappingsFile: './custom-cdn-mappings.json',
-      exclude: ['some-package'],
-    })
-  ]
-})
+npx vite-sustainable --outDir dist --exclude react,react-dom
 ```
 
 ## Configuration
@@ -80,7 +63,6 @@ export default defineConfig({
 |--------|------|---------|-------------|
 | `root` | `string` | `process.cwd()` | Root directory of the project |
 | `outDir` | `string` | `'dist'` | Output directory for builds |
-| `cdnMappingsPath` | `string` | Built-in mappings | Path to CDN mappings configuration |
 | `exclude` | `string[]` | `[]` | Packages to exclude from externalization |
 
 ### CDN Mappings
@@ -120,8 +102,7 @@ dist/
 │   ├── index-xxxxx.js
 │   └── index-xxxxx.css
 └── mini/              # Optimized build files
-    ├── index-xxxxx.js
-    └── index-xxxxx.css
+    └── index-xxxxx.js
 ```
 
 The generated `index.html` includes:
@@ -139,7 +120,7 @@ The generated `index.html` includes:
 <script type="module">
   await Promise.resolve(
     setTimeout(async () => {
-      if (window.__SUSTAINABLE_BUILD__) {
+      if (document.documentElement.hasAttribute('sustainable-extension-loaded')) {
         await import("/assets/index-xxxxx.js");
       } else {
         await import("/mini/index-xxxxx.js");
@@ -152,10 +133,7 @@ The generated `index.html` includes:
 ## Benefits
 
 ### 👶 Reduced Bundle Size 
-Dependencies are externalized and loaded from CDNs
-
-### 🤖 Better Caching 
-Dependencies cached across different applications/origins
+Dependencies are externalized and loaded from a [browser extension](https://chromewebstore.google.com/detail/sustainable-browser/cdpbgdconlejjfnpifkpalpcfohmiolf).
 
 ### 🌿 Sustainable Web 
 The more applications use this plugin, the more dependencies can be cached across domains and the more energy will be saved.

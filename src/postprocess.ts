@@ -257,8 +257,6 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
   const outputDir = resolve(rootDir, outDir);
   const miniDir = resolve(outputDir, "mini");
 
-  console.log("🚀 Starting sustainable post-processing...");
-
   try {
     console.log(
       `📋 CDN mappings available for ${Object.keys(cdnMappings).length} packages`,
@@ -572,10 +570,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
     const unifiedHtml = `<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${getTitle(standardHtml)}</title>${additionalHeadContent}
+    ${additionalHeadContent}
 
     <script type="importmap">
       {
@@ -689,10 +684,6 @@ function extractAdditionalHeadContent(html: string): string {
     
     // Skip if it's a charset, viewport, title, or the build's assets
     if (
-      trimmed.startsWith("<meta charset") ||
-      trimmed.startsWith('<meta name="viewport"') ||
-      trimmed.startsWith("<title>") ||
-      trimmed.startsWith('<link rel="icon"') ||
       trimmed.match(/<script type="module" crossorigin src="\/assets\//) ||
       trimmed.match(/<link rel="stylesheet" crossorigin href="\/assets\//)
     ) {

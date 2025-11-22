@@ -626,11 +626,6 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
   }
 }
 
-function getTitle(html: string): string {
-  const titleMatch = html.match(/<title>([^<]+)<\/title>/);
-  return titleMatch?.[1] || "Vite App";
-}
-
 /**
  * Renames an asset file to include the gzipped file size in bytes in the filename
  * Pattern: index-HASH.js becomes index-HASH-1234.js (where 1234 is gzipped bytes)

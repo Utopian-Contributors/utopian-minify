@@ -1,16 +1,16 @@
 {
-  "name": "vite-sustainable",
-  "version": "0.0.35",
+  "name": "vite-utopian",
+  "version": "0.0.5",
   "description": "A post-processing tool that creates dual builds with import maps for cross-origin caching",
   "repository": {
     "type": "git",
-    "url": "git@github.com:Utopian-Contributors/vite-sustainable.git"
+    "url": "git@github.com:Utopian-Contributors/vite-utopian.git"
   },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "vite-sustainable": "./dist/cli.js"
+    "vite-utopian": "./dist/cli.js"
   },
   "exports": {
     ".": {
@@ -38,7 +38,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.4",
-    "@types/semver": "^7.5.8",
     "prettier": "^3.6.2",
     "rimraf": "^6.0.1",
     "tsc": "^2.0.4",
@@ -46,6 +45,6 @@
     "vite": "^7.1.9"
   },
   "dependencies": {
-    "semver": "^7.7.3"
+    "es-module-lexer": "^2.0.0"
   }
 }

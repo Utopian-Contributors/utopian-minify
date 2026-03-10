@@ -1,6 +1,6 @@
-# vite-sustainable
+# vite-utopian
 
-[![npm version](https://badge.fury.io/js/vite-sustainable.svg)](https://badge.fury.io/js/vite-sustainable)
+[![npm version](https://badge.fury.io/js/vite-utopian.svg)](https://badge.fury.io/js/vite-utopian)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Vite post-processing tool that enhances your existing build with a sustainable alternative. It creates an additional optimized mini build with externalized dependencies loaded from esm.sh CDNs using import maps, then updates your index.html to conditionally load the based on the `sustainable-extension-loaded` attribute on the html document. This ensures the mini build is only loaded when the sustainable browser extension is installed.
@@ -18,7 +18,7 @@ A Vite post-processing tool that enhances your existing build with a sustainable
 ## Installation
 
 ```bash
-npm install -D vite-sustainable
+npm install -D vite-utopian
 ```
 
 > **Note**: 
@@ -36,7 +36,7 @@ Add to your `package.json` scripts:
 {
   "scripts": {
     "build": "vite build",
-    "postbuild": "vite-sustainable"
+    "postbuild": "vite-utopian"
   }
 }
 ```
@@ -45,14 +45,14 @@ Then run your normal build:
 
 ```bash
 npm run build
-# vite-sustainable runs automatically after build completes
+# vite-utopian runs automatically after build completes
 ```
 
 ### CLI Options
 
 ```bash
 # With custom options
-npx vite-sustainable --outDir dist --exclude react,react-dom
+npx vite-utopian --outDir dist --exclude react,react-dom
 ```
 
 ## Configuration
@@ -150,4 +150,4 @@ MIT © [Ludwig Schubert](https://github.com/Utopian-Contributors)
 
 ## Contributing
 
-Issues and pull requests are welcome on [GitHub](https://github.com/Utopian-Contributors/vite-sustainable).
+Issues and pull requests are welcome on [GitHub](https://github.com/Utopian-Contributors/vite-utopian).

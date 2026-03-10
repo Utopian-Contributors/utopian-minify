@@ -5,24 +5,34 @@ import { createDualBuild } from './postprocess.js';
 interface CLIOptions {
   root?: string;
   outDir?: string;
-  cdnMappingsPath?: string;
   exclude?: string[];
+  verbose?: boolean;
 }
 
 // Parse command line arguments
 const args = process.argv.slice(2);
 const options: CLIOptions = {};
 
-for (let i = 0; i < args.length; i += 2) {
-  const key = args[i]?.replace('--', '');
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i];
+
+  if (arg === '--verbose') {
+    options.verbose = true;
+    continue;
+  }
+
+  const key = arg?.replace('--', '');
   const value = args[i + 1];
-  
+
   if (key === 'exclude' && value) {
     options.exclude = value.split(',');
+    i++;
   } else if (key === 'root' && value) {
     options.root = value;
+    i++;
   } else if (key === 'outDir' && value) {
     options.outDir = value;
+    i++;
   }
 }
 
@@ -31,14 +41,11 @@ if (!options.root) {
   options.root = process.cwd();
 }
 
-console.log('🚀 Running sustainable post-processing with options:', options);
-
 createDualBuild(options)
   .then(() => {
-    console.log('✅ Post-processing complete!');
     process.exit(0);
   })
   .catch((error) => {
-    console.error('❌ Post-processing failed:', error);
+    console.error('Post-processing failed:', error);
     process.exit(1);
   });

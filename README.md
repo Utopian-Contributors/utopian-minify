@@ -1,34 +1,14 @@
-# vite-utopian
+# utopian-minify
 
-[![npm version](https://badge.fury.io/js/vite-utopian.svg)](https://badge.fury.io/js/vite-utopian)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-A Vite post-processing tool that enhances your existing build with a sustainable alternative. It creates an additional optimized mini build with externalized dependencies loaded from esm.sh CDNs using import maps, then updates your index.html to conditionally load the based on the `sustainable-extension-loaded` attribute on the html document. This ensures the mini build is only loaded when the sustainable browser extension is installed.
-
-
-## Features
-
-�️ **Dual Build System** - Creates both standard and optimized builds in a single step  
-🌍 **Smart Loading** - Automatically selects build based on `window.__SUSTAINABLE_BUILD__` flag  
-📦 **Import Maps** - Generates HTML import maps with exact dependency versions from lock files  
-⚡ **CDN Externalization** - Reduces bundle size by loading dependencies from extension  
-🔧 **Customizable** - Configure CDN mappings and exclusions per project  
-🚀 **Post-Build Processing** - Runs after your normal Vite build completes
+A post-processing tool that creates dual builds with import maps for cross-origin dependency caching. It runs after your bundler's build, creates a second "mini" build with dependencies externalized to a CDN via import maps, and rewrites `index.html` to conditionally load the mini build when the [Sustainable Browser Extension](https://chromewebstore.google.com/detail/sustainable-browser/cdpbgdconlejjfnpifkpalpcfohmiolf) is installed.
 
 ## Installation
 
 ```bash
-npm install -D vite-utopian
+npm install -D utopian-minify
 ```
 
-> **Note**: 
-> - Install as a **dev dependency** (`-D` flag)
-> - Requires Vite 4+ as a peer dependency
-> - This is a post-processing tool that runs **after** your normal Vite build
-
 ## Usage
-
-### As a Post-Processing Tool (Recommended)
 
 Add to your `package.json` scripts:
 
@@ -36,118 +16,67 @@ Add to your `package.json` scripts:
 {
   "scripts": {
     "build": "vite build",
-    "postbuild": "vite-utopian"
+    "postbuild": "utopian-minify"
   }
 }
 ```
 
-Then run your normal build:
-
-```bash
-npm run build
-# vite-utopian runs automatically after build completes
-```
+The bundler is auto-detected from your config file (`vite.config.ts`, `webpack.config.js`, `rollup.config.mjs`, etc.).
 
 ### CLI Options
 
 ```bash
-# With custom options
-npx vite-utopian --outDir dist --exclude react,react-dom
+utopian-minify --bundler vite        # explicit bundler override
+utopian-minify --outDir dist         # custom output directory
+utopian-minify --exclude lodash,dayjs  # exclude packages from externalization
+utopian-minify --verbose             # detailed logging
 ```
 
-## Configuration
-
-### Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `root` | `string` | `process.cwd()` | Root directory of the project |
-| `outDir` | `string` | `'dist'` | Output directory for builds |
-| `exclude` | `string[]` | `[]` | Packages to exclude from externalization |
-
-### CDN Mappings
-
-Create a `cdn-mappings.json` file to define which packages should be loaded from CDNs:
-
-```json
-{
-  "react": "https://esm.sh/react@{version}",
-  "react-dom": "https://esm.sh/react-dom@{version}",
-  "framer-motion": "https://esm.sh/framer-motion@{version}",
-  "clsx": "https://esm.sh/clsx@{version}"
-}
-```
-
-The `{version}` placeholder will be replaced with the exact version from your lock file.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--bundler` | auto-detect | Bundler to use (`vite`, more coming) |
+| `--root` | `cwd` | Project root directory |
+| `--outDir` | `dist` | Build output directory |
+| `--exclude` | none | Comma-separated packages to keep bundled |
+| `--verbose` | off | Print detailed build info |
 
 ## How It Works
 
-1. **Runs After Build** - Processes your existing Vite build output
-2. **Dependency Analysis** - Reads lock files to find exact versions of all dependencies
-3. **Mini Build Creation** - Creates optimized build with CDN-mapped dependencies in `dist/mini/`
-4. **Import Map Generation** - Injects import maps for externalized dependencies
-5. **Index.html Enhancement** - Updates your index.html with conditional loading:
-   - When `window.__SUSTAINABLE_BUILD__` is true: loads standard build
-   - Otherwise: loads mini build with CDN dependencies
-6. **Original Backup** - Keeps your original index.html as `index.original.html`
-
-## Example Output
-
-After running the post-processor, your `dist/` directory will contain:
-
-```
-dist/
-├── index.html          # Smart loader with conditional loading
-├── assets/            # Standard build files
-│   ├── index-xxxxx.js
-│   └── index-xxxxx.css
-└── mini/              # Optimized build files
-    └── index-xxxxx.js
-```
-
-The generated `index.html` includes:
+1. Reads your `package.json` dependencies and their exact installed versions from `node_modules`
+2. Runs a second build with all dependencies marked as external
+3. Scans the mini build output with [es-module-lexer](https://github.com/nicolo-ribaudo/es-module-lexer) to find the actual import specifiers used
+4. Generates an import map mapping each specifier to a `native://esm/{pkg}@{version}` URL
+5. Rewrites `index.html` with the import map and conditional loading:
 
 ```html
 <script type="importmap">
-  {
-    "imports": {
-      "react": "https://esm.sh/react@19.2.0",
-      "react-dom": "https://esm.sh/react-dom@19.2.0"
-    }
-  }
+  { "imports": { "react": "native://esm/react@18.3.1" } }
 </script>
-
 <script type="module">
-  await Promise.resolve(
-    setTimeout(async () => {
-      if (document.documentElement.hasAttribute('sustainable-extension-loaded')) {
-        await import("/assets/index-xxxxx.js");
-      } else {
-        await import("/mini/index-xxxxx.js");
-      }
-    }, 10)
-  );
+  if (window.NATIVE_SCHEME_SUPPORT) {
+    await import("/mini/index-abc123.js");
+  } else {
+    await import("/assets/index-abc123.js");
+  }
 </script>
 ```
 
-## Benefits
+## Output
 
-### 👶 Reduced Bundle Size 
-Dependencies are externalized and loaded from a [browser extension](https://chromewebstore.google.com/detail/sustainable-browser/cdpbgdconlejjfnpifkpalpcfohmiolf).
+```
+dist/
+├── index.html           # unified loader with import map
+├── assets/              # standard build (fallback)
+│   ├── index-xxxxx.js
+│   └── index-xxxxx.css
+└── mini/                # externalized build
+    └── index-xxxxx.js
+```
 
-### 🌿 Sustainable Web 
-The more applications use this plugin, the more dependencies can be cached across domains and the more energy will be saved.
+## Bundler Support
 
-## Requirements
-
-- Vite 4+ 
-- Node.js 18+
-- Modern browsers with [import maps support](https://caniuse.com/import-maps)
+Currently supports **Vite**. Webpack and Rollup adapters are planned. The architecture uses a bundler adapter pattern — contributions for new adapters are welcome.
 
 ## License
 
-MIT © [Ludwig Schubert](https://github.com/Utopian-Contributors)
-
-## Contributing
-
-Issues and pull requests are welcome on [GitHub](https://github.com/Utopian-Contributors/vite-utopian).
+MIT

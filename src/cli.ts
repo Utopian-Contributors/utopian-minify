@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
 import { createDualBuild } from './postprocess.js';
+import { detectBundler, loadAdapter } from './adapters/detect.js';
 
 interface CLIOptions {
   root?: string;
   outDir?: string;
   exclude?: string[];
   verbose?: boolean;
+  bundler?: string;
 }
 
 // Parse command line arguments
@@ -33,6 +35,9 @@ for (let i = 0; i < args.length; i++) {
   } else if (key === 'outDir' && value) {
     options.outDir = value;
     i++;
+  } else if (key === 'bundler' && value) {
+    options.bundler = value;
+    i++;
   }
 }
 
@@ -41,7 +46,10 @@ if (!options.root) {
   options.root = process.cwd();
 }
 
-createDualBuild(options)
+const bundlerName = options.bundler || detectBundler(options.root);
+const adapter = await loadAdapter(bundlerName);
+
+createDualBuild(options, adapter)
   .then(() => {
     process.exit(0);
   })

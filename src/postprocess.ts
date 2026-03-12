@@ -8,10 +8,9 @@ import {
   writeFileSync,
 } from "fs";
 import { join, resolve } from "path";
-import type { InlineConfig } from "vite";
-import { build as viteBuild } from "vite";
 import { gzipSync } from "zlib";
 import { init as initLexer, parse as parseImports } from "es-module-lexer";
+import type { BundlerAdapter } from "./adapters/types.js";
 
 export interface PostProcessOptions {
   root?: string;
@@ -183,7 +182,35 @@ function generateImportMap(
   return importMap;
 }
 
-export async function createDualBuild(options: PostProcessOptions = {}) {
+function findEntryFile(assetsDir: string): string {
+  const jsFiles = readdirSync(assetsDir).filter(
+    (f) => f.startsWith("index-") && f.endsWith(".js"),
+  );
+  if (jsFiles.length === 0) {
+    throw new Error(`No entry JS file found in ${assetsDir}`);
+  }
+  return jsFiles[0]!;
+}
+
+const CONFIG_EXTENSIONS = [".ts", ".js", ".mjs", ".mts"];
+
+function findConfigFile(
+  rootDir: string,
+  configFileNames: string[],
+): string | false {
+  for (const base of configFileNames) {
+    for (const ext of CONFIG_EXTENSIONS) {
+      const p = resolve(rootDir, base + ext);
+      if (existsSync(p)) return p;
+    }
+  }
+  return false;
+}
+
+export async function createDualBuild(
+  options: PostProcessOptions = {},
+  adapter: BundlerAdapter,
+) {
   const {
     root = process.cwd(),
     outDir = "dist",
@@ -204,7 +231,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
     const depsToExternalize = allDeps.filter((dep) => !exclude.includes(dep));
 
     if (depsToExternalize.length === 0) {
-      console.log("vite-utopian: No dependencies to externalize");
+      console.log("utopian-minify: No dependencies to externalize");
       return;
     }
 
@@ -217,7 +244,7 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
     );
 
     console.log(
-      `vite-utopian: Externalizing ${depsToExternalize.length} dependencies`,
+      `utopian-minify: Externalizing ${depsToExternalize.length} dependencies`,
     );
 
     // Check if build exists
@@ -229,39 +256,29 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
 
     // Read existing build files
     const standardIndexPath = join(outputDir, "index.html");
-    let standardHtml = "";
-    let standardScriptPath = "";
-    let standardStylePath = "";
 
-    if (existsSync(standardIndexPath)) {
-      standardHtml = readFileSync(standardIndexPath, "utf-8");
-
-      const scriptMatch = standardHtml.match(
-        /<script type="module" crossorigin src="(\/assets\/[^"]+)">/,
-      );
-      const styleMatch = standardHtml.match(
-        /<link rel="stylesheet" crossorigin href="(\/assets\/[^"]+)">/,
-      );
-
-      standardScriptPath = scriptMatch?.[1] || "";
-      standardStylePath = styleMatch?.[1] || "";
-
-      if (verbose && standardScriptPath) {
-        const standardScriptFullPath = join(outputDir, standardScriptPath);
-        if (existsSync(standardScriptFullPath)) {
-          const content = readFileSync(standardScriptFullPath);
-          const gzipped = gzipSync(content);
-          console.log(`Standard build script: ${standardScriptPath} (${gzipped.length} bytes gzipped)`);
-        }
-      }
-    } else {
+    if (!existsSync(standardIndexPath)) {
       console.error("Error: No index.html found in build directory");
       return;
     }
 
-    // Setup for mini build
-    const viteConfigPath = resolve(rootDir, "vite.config.ts");
-    const configFileExists = existsSync(viteConfigPath);
+    const standardHtml = readFileSync(standardIndexPath, "utf-8");
+    const standardOutput = adapter.parseHtmlOutput(standardHtml);
+
+    // Find standard build entry JS by scanning the assets directory
+    const standardAssetsDir = join(outputDir, "assets");
+    const standardEntryFile = findEntryFile(standardAssetsDir);
+    const standardScriptPath = `/assets/${standardEntryFile}`;
+
+    if (verbose) {
+      const standardScriptFullPath = join(standardAssetsDir, standardEntryFile);
+      const content = readFileSync(standardScriptFullPath);
+      const gzipped = gzipSync(content);
+      console.log(`Standard build script: ${standardScriptPath} (${gzipped.length} bytes gzipped)`);
+    }
+
+    // Detect bundler config file
+    const configFile = findConfigFile(rootDir, adapter.configFileNames);
 
     // Run mini build with externalized dependencies
     if (verbose) {
@@ -269,33 +286,12 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       console.log("Dependencies to externalize:", depsToExternalize);
     }
 
-    const miniBuildConfig: InlineConfig = {
-      root: rootDir,
-      mode: "production",
-      build: {
-        outDir: miniDir,
-        emptyOutDir: true,
-        copyPublicDir: false,
-        rollupOptions: {
-          external: (id: string) => {
-            return depsToExternalize.some((dep) => {
-              if (id === dep) return true;
-              if (id.startsWith(dep + "/")) return true;
-              return false;
-            });
-          },
-          output: {
-            format: "es",
-            entryFileNames: "assets/index-[hash].js",
-            chunkFileNames: "assets/[name]-[hash].js",
-            assetFileNames: "assets/[name]-[hash].[ext]",
-          },
-        },
-      },
-      configFile: configFileExists ? viteConfigPath : false,
-    };
-
-    await viteBuild(miniBuildConfig);
+    const buildResult = await adapter.buildWithExternals({
+      rootDir,
+      outDir: miniDir,
+      externals: depsToExternalize,
+      configFile,
+    });
     if (verbose) console.log("Mini build completed");
 
     // Scan mini build output for actual external import specifiers
@@ -321,24 +317,9 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       verbose,
     );
 
-    // Get mini build file paths
-    let miniScriptPath = "";
-
+    // Mini build entry path (will be served from /mini/ in the final output)
+    const miniScriptPath = `/mini/${buildResult.entryFile.replace(/^assets\//, "")}`;
     const miniIndexPath = join(miniDir, "index.html");
-
-    if (existsSync(miniIndexPath)) {
-      const miniHtml = readFileSync(miniIndexPath, "utf-8");
-
-      const miniScriptMatch = miniHtml.match(
-        /<script type="module" crossorigin src="(\/[^"]+)">/,
-      );
-
-      if (miniScriptMatch?.[1]) {
-        miniScriptPath = miniScriptMatch[1].replace("/assets/", "/mini/");
-      } else {
-        throw new Error("Could not find script path in mini build index.html");
-      }
-    }
 
     // Move mini assets to dist/mini and rename with file size
     const targetMiniDir = join(outputDir, "mini");
@@ -370,15 +351,11 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       }
     }
 
-    // Extract additional head content and body from the original HTML
-    const additionalHeadContent = extractAdditionalHeadContent(standardHtml);
-    const bodyContent = extractBodyContent(standardHtml);
-
     // Create the unified index.html with conditional loading
     const unifiedHtml = `<!DOCTYPE html>
 <html lang="en">
   <head>
-    ${additionalHeadContent}
+    ${standardOutput.headContent}
 
     <script type="importmap">
       ${JSON.stringify({ imports: importMap }, null, 6)}
@@ -391,9 +368,9 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
         await import("${standardScriptPath}");
       }
     </script>
-    <link rel="stylesheet" crossorigin href="${standardStylePath}" />
+    <link rel="stylesheet" crossorigin href="${standardOutput.stylePath}" />
   </head>
-  <body>${bodyContent}</body>
+  <body>${standardOutput.bodyContent}</body>
 </html>`;
 
     writeFileSync(standardIndexPath, unifiedHtml);
@@ -406,56 +383,9 @@ export async function createDualBuild(options: PostProcessOptions = {}) {
       rmSync(miniAssetsDir, { recursive: true });
     }
 
-    console.log("vite-utopian: Post-processing complete");
+    console.log("utopian-minify: Post-processing complete");
   } catch (error) {
     console.error("Error during post-processing:", error);
     throw error;
   }
-}
-
-
-/**
- * Extracts additional scripts and meta tags from the head that should be preserved
- */
-function extractAdditionalHeadContent(html: string): string {
-  const headMatch = html.match(/<head>([\s\S]*?)<\/head>/);
-  if (!headMatch || !headMatch[1]) return "";
-
-  const headContent = headMatch[1];
-  const lines: string[] = [];
-
-  const headLines = headContent.split("\n");
-
-  for (const line of headLines) {
-    const trimmed = line.trim();
-
-    if (
-      trimmed.match(/<script type="module" crossorigin src="\/assets\//) ||
-      trimmed.match(/<link rel="stylesheet" crossorigin href="\/assets\//)
-    ) {
-      continue;
-    }
-
-    if (trimmed.length > 0) {
-      lines.push(line);
-    }
-  }
-
-  return lines.length > 0 ? "\n" + lines.join("\n") : "";
-}
-
-function extractBodyContent(html: string): string {
-  const bodyMatch = html.match(/<body>([\s\S]*?)<\/body>/);
-  if (!bodyMatch || !bodyMatch[1]) return "";
-
-  const bodyContent = bodyMatch[1];
-  return bodyContent;
-}
-
-// Allow running as a CLI script
-if (import.meta.url === `file://${process.argv[1]}`) {
-  createDualBuild().catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
 }

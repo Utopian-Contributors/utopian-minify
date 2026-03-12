@@ -1,5 +1,5 @@
 {
-  "name": "vite-utopian",
+  "name": "utopian-minify",
   "version": "0.0.5",
   "description": "A post-processing tool that creates dual builds with import maps for cross-origin caching",
   "repository": {
@@ -10,7 +10,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "vite-utopian": "./dist/cli.js"
+    "utopian-minify": "./dist/cli.js"
   },
   "exports": {
     ".": {
@@ -29,12 +29,18 @@
     "build": "rimraf dist && tsc && chmod +x dist/cli.js",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
+    "test": "vitest run",
     "prepublishOnly": "yarn clean && yarn build"
   },
   "author": "Ludwig Schubert (@UtopianContrib)",
   "license": "MIT",
   "peerDependencies": {
     "vite": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.10.4",

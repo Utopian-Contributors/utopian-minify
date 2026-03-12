@@ -1,0 +1,66 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`createDualBuild > produces correct unified HTML with React app 1`] = `
+"<!DOCTYPE html>
+<html lang="en">
+  <head>
+        <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test App</title>
+
+    <script type="importmap">
+      {
+      "imports": {
+            "react": "native://esm/react@18.3.1",
+            "react/jsx-runtime": "native://esm/react@18.3.1/jsx-runtime"
+      }
+}
+    </script>
+
+    <script type="module">
+      if (window.NATIVE_SCHEME_SUPPORT) {
+        await import("/mini/index-mini123.js");
+      } else {
+        await import("/assets/index-abc123.js");
+      }
+    </script>
+    <link rel="stylesheet" crossorigin href="/assets/index-def456.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>"
+`;
+
+exports[`createDualBuild > produces correct unified HTML with Vue app (#app mount) 1`] = `
+"<!DOCTYPE html>
+<html lang="en">
+  <head>
+        <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vue App</title>
+
+    <script type="importmap">
+      {
+      "imports": {
+            "react": "native://esm/react@18.3.1",
+            "react/jsx-runtime": "native://esm/react@18.3.1/jsx-runtime"
+      }
+}
+    </script>
+
+    <script type="module">
+      if (window.NATIVE_SCHEME_SUPPORT) {
+        await import("/mini/index-mini123.js");
+      } else {
+        await import("/assets/index-vue789.js");
+      }
+    </script>
+    <link rel="stylesheet" crossorigin href="/assets/index-vuecss.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+  </body>
+</html>"
+`;

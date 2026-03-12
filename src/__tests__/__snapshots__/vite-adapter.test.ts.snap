@@ -1,0 +1,29 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`vite adapter parseHtmlOutput > extracts stylesheet path from vite react build 1`] = `
+{
+  "bodyContent": "
+    <div id="root"></div>
+  ",
+  "headContent": "
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + React</title>",
+  "stylePath": "/assets/index-DPfhLfgY.css",
+}
+`;
+
+exports[`vite adapter parseHtmlOutput > extracts stylesheet path from vite vue build 1`] = `
+{
+  "bodyContent": "
+    <div id="app"></div>
+  ",
+  "headContent": "
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite App</title>",
+  "stylePath": "/assets/index-CvK8x2wL.css",
+}
+`;
